@@ -1,8 +1,11 @@
 devel/
 logs/
 build/
+install/
+log/
 bin/
 lib/
+.eggs/
 msg_gen/
 srv_gen/
 msg/*Action.msg

@@ -1,0 +1,3 @@
+[console_scripts]
+arm_movement_server = dm_arm_control.arm_movement_server:main
+
