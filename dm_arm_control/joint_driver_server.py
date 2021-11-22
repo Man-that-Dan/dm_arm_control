@@ -4,7 +4,12 @@ from rclpy.node import Node
 from rclpy.action import ActionServer
 from dm_arm_interfaces.action import MoveJoint
 from functools import partial
+import threading
+from gpiozero import Device, AngularServo
+from gpiozero.pins.pigpio import PiGPIOFactory
+from time import sleep
 
+Device.pin_factory = PiGPIOFactory()
 
 class JointDriverServer(Node):
 
@@ -17,22 +22,115 @@ class JointDriverServer(Node):
             'move_joints',
             self.move_joints)
         self.angles = [0, 0, 0, 0, 0]
-        # something likeself.move_joints(self.angles) 
+
+        # declare parameters
+
+        #angles that actually represent 0 for joints because the servos are not great
+        #thought about parameterizing this but all of this driver node is so specific to this one arm anyways
+        #TODO update values
+        midAngle0 = 0
+        midAngle1 = 0
+        midAngle2 = 0
+        midAngle3 = 0
+        midAngle4 = 0
+        self.mids = [midAngle0, midAngle1, midAngle2, midAngle3, midAngle4]
+
+        #pins for servos
+        self.declare_parameter('servo0Pin', 27)
+        self.declare_parameter('servo1Pin', 22)
+        self.declare_parameter('servo2Pin', 17)
+        self.declare_parameter('servo3Pin', 2)
+        self.declare_parameter('servo4Pin', 3)
+        self.declare_parameter('endEffectorServoPin', 4)
+
+        #speed of movement, period to move servos 1 degree
+        self.declare_parameter('movement_period', 0.2)
+
+        self.servo0 = AngularServo(self.get_parameter('servo0Pin').get_parameter_value().integer_value, max_angle=141.76035, min_angle=-141.76035, min_pulse_width = 0.0005, max_pulse_width = 0.0025, frame_width=0.020)
+        self.servo1 = AngularServo(self.get_parameter('servo1Pin').get_parameter_value().integer_value, max_angle=90, min_angle=-90, min_pulse_width = 0.0005, max_pulse_width = 0.0025, frame_width=0.020)
+        self.servo2 = AngularServo(self.get_parameter('servo2Pin').get_parameter_value().integer_value, max_angle=141.76035, min_angle=-141.76035, min_pulse_width = 0.0005, max_pulse_width = 0.0025, frame_width=0.020)
+        self.servo3 = AngularServo(self.get_parameter('servo3Pin').get_parameter_value().integer_value, max_angle=141.76035, min_angle=-141.76035, min_pulse_width = 0.0005, max_pulse_width = 0.0025, frame_width=0.020)
+        self.servo4 = AngularServo(self.get_parameter('servo4Pin').get_parameter_value().integer_value, max_angle=90, min_angle=-90, min_pulse_width = 0.0005, max_pulse_width = 0.0025, frame_width=0.020)
+        self.endEffectorServo = AngularServo(self.get_parameter('endEffectorServoPin').get_parameter_value().integer_value, max_angle=45, min_angle=-45, min_pulse_width = 0.0005, max_pulse_width = 0.002, frame_width=0.020)
+        self.servos = [self.servo0, self.servo1, self.servo2, self.servo3, self.servo4, self.endEffectorServo]
+
+        #set servos to initial angles
+        index = 0
+        servoThreads = []
+        result_angles = [0, 0, 0, 0, 0]
+        for angle in self.angles:
+            real_angle = self.translate_angle_to_real(angle, index)
+            currentThread = threading.Thread(target=self.move_servo, args=(self, self.servos[index], real_angle, result_angles[index]))
+            servoThreads.append(currentThread)
+            index += 1
+        for thread in servoThreads:
+            thread.start()
+        for thread in servoThreads:
+            thread.join()
+        index = 0
+        for result in result_angles:
+            self.angles[index] = self.translate_real_angle_to_kinematic(result, index)        
+        
 
     def move_joints(self, goal_handle):
         self.get_logger().info('Executing goal...')
         #send the goal position to the IK service
-        goal_position = goal_handle.goal_position
+        goal_angles = goal_handle.angle
 
-        # do the joint moving and publish the feedback
-        current_feedback = MoveJoint.Feedback()
-        try:
-            current_feedback.last_angles_set = self.angles
-            goal_handle.publish_feedback(current_feedback)
-        except Exception as ex:
-            self.get_logger().error("exception sending feedback")    
-        result = True
-        return result 
+        #set servos to angles
+        index = 0
+        servoThreads = []
+        result_angles = self.angles
+        for angle in goal_angles:
+            real_angle = self.translate_angle_to_real(angle, index)
+            currentThread = threading.Thread(target=self.move_servo, args=(self, self.servos[index], real_angle, result_angles[index]))
+            servoThreads.append(currentThread)
+            index += 1
+        for thread in servoThreads:
+            thread.start()
+        all_done = False
+        while not all_done:
+            all_done = True
+            for thread in servoThreads:
+                if thread.is_alive():
+                    all_done = False
+            # publish the feedback
+            current_feedback = MoveJoint.Feedback() 
+            try:
+                current_feedback.last_angles_set = result_angles
+                goal_handle.publish_feedback(current_feedback)
+            except Exception as ex:
+                self.get_logger().error("exception sending feedback")  
+        for thread in servoThreads:
+            thread.join()
+        index = 0
+        for result in result_angles:
+            self.angles[index] = self.translate_real_angle_to_kinematic(result, index)        
+
+        
+        #TODO some exception handling  
+        result = MoveJoint.result()
+        result.success = True
+        result.angles = self.angles
+        return result
+
+    def move_servo(self, servo, new_angle, set_angle):
+        movement_period = self.get_parameter('movement_period').get_parameter_value().float_value
+        while not round(servo.angle, 0) == new_angle:
+            if new_angle > servo.angle:
+                servo.angle += 1
+                sleep(movement_period)
+            elif new_angle < servo.angle:
+                servo.angle -= 1
+                sleep(movement_period)
+        set_angle = servo.angle
+    def translate_angle_to_real(self, angle, servoIndex):
+        actualZero = self.mids[servoIndex]
+        return actualZero + angle
+
+    def translate_real_angle_to_kinematic(self, angle, servoIndex):
+        actualZero = self.mids[servoIndex]
+        return angle - actualZero                     
 
 def main(args=None):
     rclpy.init(args=args)

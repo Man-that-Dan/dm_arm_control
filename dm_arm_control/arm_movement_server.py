@@ -91,8 +91,12 @@ class ArmMovementServer(Node):
             self.get_logger().error("exception sending feedback")
 
     def driver_complete_callback(self, future):
-        return
-
+        response = future.result()
+        self.angles = response.angles
+        if not response.success:
+            self.error_ocurred = True
+        else:
+            self.error_ocurred = False    
 
 def main(args=None):
     rclpy.init(args=args)
