@@ -20,8 +20,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'arm_movement_server= dm_arm_control.arm_movement_server:main'
-            'kinematics_service= dm_arm_control.kinematics_service:main'
+            'arm_movement_server = dm_arm_control.arm_movement_server:main',
+            'kinematics_service = dm_arm_control.kinematics_service:main',
+            'joint_driver = dm_arm_control.joint_driver_server:main'
         ],
     },
 )

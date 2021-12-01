@@ -11,13 +11,13 @@ class KinematicsService(Node):
     def __init__(self):
         super().__init__("kinematics_service")
         #link lengths
-        self.declare_parameter('a1', 0.1)
-        self.declare_parameter('a2', 0.6)
-        self.declare_parameter('a3', 0.5)
+        self.declare_parameter('a1', 0.10795)
+        self.declare_parameter('a2', 0.10795)
+        self.declare_parameter('a3', 0.10795)
         self.sampling_distance = 0.1
         self.learning_rate = 2
-        self.server_ = self.create_service(IKRequest, "dm_ik", self.handle_ik_request)
-        self.server_ = self.create_service(FKRequest, "dm_fk", self.handle_fk_request)
+        self.ikserver_ = self.create_service(IKRequest, "dm_ik", self.handle_ik_request)
+        self.fkserver_ = self.create_service(FKRequest, "dm_fk", self.handle_fk_request)
 
     def handle_ik_request(self, request, response):
         pose = request.pose

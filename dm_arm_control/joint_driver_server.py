@@ -27,11 +27,10 @@ class JointDriverServer(Node):
 
         #angles that actually represent 0 for joints because the servos are not great
         #thought about parameterizing this but all of this driver node is so specific to this one arm anyways
-        #TODO update values
-        midAngle0 = 0
+        midAngle0 = -28
         midAngle1 = 0
-        midAngle2 = 0
-        midAngle3 = 0
+        midAngle2 = -5
+        midAngle3 = 20
         midAngle4 = 0
         self.mids = [midAngle0, midAngle1, midAngle2, midAngle3, midAngle4]
 
@@ -60,7 +59,7 @@ class JointDriverServer(Node):
         result_angles = [0, 0, 0, 0, 0]
         for angle in self.angles:
             real_angle = self.translate_angle_to_real(angle, index)
-            currentThread = threading.Thread(target=self.move_servo, args=(self, self.servos[index], real_angle, result_angles[index]))
+            currentThread = threading.Thread(target=self.move_servo, args=(self.servos[index], real_angle, result_angles[index]))
             servoThreads.append(currentThread)
             index += 1
         for thread in servoThreads:
@@ -86,6 +85,7 @@ class JointDriverServer(Node):
             currentThread = threading.Thread(target=self.move_servo, args=(self, self.servos[index], real_angle, result_angles[index]))
             servoThreads.append(currentThread)
             index += 1
+        self.error_ocurred = False
         for thread in servoThreads:
             thread.start()
         all_done = False
@@ -108,22 +108,29 @@ class JointDriverServer(Node):
             self.angles[index] = self.translate_real_angle_to_kinematic(result, index)        
 
         
-        #TODO some exception handling  
+         
         result = MoveJoint.result()
-        result.success = True
+        if not self.error_ocurred:
+            result.success = True
+        else: 
+            result.success = False
         result.angles = self.angles
         return result
 
     def move_servo(self, servo, new_angle, set_angle):
-        movement_period = self.get_parameter('movement_period').get_parameter_value().float_value
-        while not round(servo.angle, 0) == new_angle:
-            if new_angle > servo.angle:
-                servo.angle += 1
-                sleep(movement_period)
-            elif new_angle < servo.angle:
-                servo.angle -= 1
-                sleep(movement_period)
+        movement_period = self.get_parameter('movement_period').value
+        try:
+            while not round(servo.angle, 0) == new_angle:
+                if new_angle > servo.angle:
+                    servo.angle += 1
+                    sleep(movement_period)
+                elif new_angle < servo.angle:
+                    servo.angle -= 1
+                    sleep(movement_period)
+        except:
+            self.error_ocurred = True
         set_angle = servo.angle
+
     def translate_angle_to_real(self, angle, servoIndex):
         actualZero = self.mids[servoIndex]
         return actualZero + angle
