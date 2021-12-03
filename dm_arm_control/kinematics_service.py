@@ -2,7 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from dm_arm_interfaces.srv import IKRequest, FKRequest
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Point, Quaternion
 import numpy as np
 import math
 
@@ -14,8 +14,8 @@ class KinematicsService(Node):
         self.declare_parameter('a1', 0.10795)
         self.declare_parameter('a2', 0.10795)
         self.declare_parameter('a3', 0.10795)
-        self.sampling_distance = 0.1
-        self.learning_rate = 2
+        self.sampling_distance = 1
+        self.learning_rate = 20
         self.ikserver_ = self.create_service(IKRequest, "dm_ik", self.handle_ik_request)
         self.fkserver_ = self.create_service(FKRequest, "dm_fk", self.handle_fk_request)
 
@@ -25,15 +25,27 @@ class KinematicsService(Node):
         target_position = [pose.position.x, pose.position.y, pose.position.z, pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z]  
         angles = self.inverse_kinematics(target_position, current_joints)
         response.angles = angles  
+        self.get_logger().info('returning ik angles')
         return response
 
     def handle_fk_request(self, request, response):
         current_joints = request.angles
+        self.get_logger().info('getting pose')
         current_position = self.fk_get_displacement(current_joints[0], current_joints[1], current_joints[2])
         current_orientation = self.get_orientation(current_joints)
         result_pose = Pose()
-        result_pose.position = current_position
-        result_pose.orientation = current_orientation
+        result_pose.position = Point()
+        result_pose.position.x = current_position[0]
+        result_pose.position.y = current_position[1]
+        result_pose.position.z = current_position[2]
+
+        result_pose.orientation = Quaternion()
+        result_pose.orientation.w = current_orientation[0]
+        result_pose.orientation.x = current_orientation[1]
+        result_pose.orientation.y = current_orientation[2]
+        result_pose.orientation.z = current_orientation[3]
+        response.pose = result_pose
+        self.get_logger().info('returning pose')
         return response    
 
     def distance_from_target(self, a, angles):
@@ -44,12 +56,13 @@ class KinematicsService(Node):
         return dist
         
     def fk_get_displacement(self, theta1, theta2, theta3):
-        a1 = self.get_parameter('a1').get_parameter_value().float_value
-        a2 = self.get_parameter('a2').get_parameter_value().float_value
-        a3 = self.get_parameter('a3').get_parameter_value().float_value
+        a1 = self.get_parameter('a1').value
+        a2 = self.get_parameter('a2').value
+        a3 = self.get_parameter('a3').value
         x = np.cos(theta1 * (np.pi/180)) * ((np.cos(theta2 * (np.pi/180)) * a2) + (np.cos((theta3+theta2) * (np.pi/180)) * a3))
         y = np.sin(theta1 * (np.pi/180)) * ((np.cos(theta2 * (np.pi/180)) * a2) + (np.cos((theta3+theta2) * (np.pi/180)) * a3))
         z = a1 + ((np.sin(theta2 * (np.pi/180)) * a2) + (np.sin((theta3+theta2) * (np.pi/180)) * a3))
+     
         return [x, y, z]
 
     def partial_gradient (self, target, angles, i):
@@ -68,6 +81,7 @@ class KinematicsService(Node):
         manipulator_angles = [angles[0], angles[1], angles[2]]
         while self.distance_from_target(target_pos, manipulator_angles) > 0.003:
             i = 0
+            #self.get_logger().info('running IK' + str(self.distance_from_target(target_pos, manipulator_angles)))
             for angle in manipulator_angles:
                 # Gradient descent
                 # Update : Solution -= LearningRate * Gradient
@@ -78,7 +92,9 @@ class KinematicsService(Node):
         angles[1] = round(manipulator_angles[1],1)
         angles[2] = round(manipulator_angles[2],1)
         target_orientation = [target[3], target[4], target[5], target[6]] 
+        self.get_logger().info('got ik I guess')
         end_effector_angles = self.get_effector_angles(target_orientation, angles)
+        self.get_logger().info('got end effector positioning')
         angles[3] = round(end_effector_angles[0],1)
         angles[4] = round(end_effector_angles[1],1)
         return angles  
@@ -94,7 +110,7 @@ class KinematicsService(Node):
         pre_theta5_orientation = self.quaternion_multiply([np.cos((angles[3] / 2) * (np.pi/180)), 0, np.sin((angles[3] / 2) * (np.pi/180)), 0], pre_theta5_orientation)
 
         final_orientation = self.quaternion_multiply([np.cos((angles[4] / 2) * (np.pi/180)), 0, 0, np.sin((angles[3] / 2) * (np.pi/180))], pre_theta5_orientation)
-
+        
         return final_orientation   
 
     def get_effector_angles(self, target_orientation, angles):
@@ -132,7 +148,7 @@ class KinematicsService(Node):
         return left[1] * right[1] + left[2] * right[2] + left[3] * right[3] + left[0] * right[0]
 
     #multiply two quaternions
-    def quaternion_multiply(quaternion1, quaternion0):
+    def quaternion_multiply(self, quaternion1, quaternion0):
         w0, x0, y0, z0 = quaternion0
         w1, x1, y1, z1 = quaternion1
         return np.array([-x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
@@ -141,7 +157,7 @@ class KinematicsService(Node):
                         x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0], dtype=np.float64)
         
     #get rotation matrix from quaternion   
-    def quaternion_rotation_matrix(Q):
+    def quaternion_rotation_matrix(self, Q):
         """
         Covert a quaternion into a full three-dimensional rotation matrix.
     

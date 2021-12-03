@@ -2,6 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from dm_arm_interfaces.action import MoveJoint
 from functools import partial
 import threading
@@ -21,17 +22,17 @@ class JointDriverServer(Node):
             MoveJoint,
             'move_joints',
             self.move_joints)
-        self.angles = [0, 0, 0, 0, 0]
+        self.angles = [0.0, 0.0, 0.0, 0.0, 0.0]
 
         # declare parameters
 
         #angles that actually represent 0 for joints because the servos are not great
         #thought about parameterizing this but all of this driver node is so specific to this one arm anyways
-        midAngle0 = -28
-        midAngle1 = 0
-        midAngle2 = -5
-        midAngle3 = 20
-        midAngle4 = 0
+        midAngle0 = -28.0
+        midAngle1 = 0.0
+        midAngle2 = -5.0
+        midAngle3 = 20.0
+        midAngle4 = 0.0
         self.mids = [midAngle0, midAngle1, midAngle2, midAngle3, midAngle4]
 
         #pins for servos
@@ -56,7 +57,7 @@ class JointDriverServer(Node):
         #set servos to initial angles
         index = 0
         servoThreads = []
-        result_angles = [0, 0, 0, 0, 0]
+        result_angles = [0.0, 0.0, 0.0, 0.0, 0.0]
         for angle in self.angles:
             real_angle = self.translate_angle_to_real(angle, index)
             currentThread = threading.Thread(target=self.move_servo, args=(self.servos[index], real_angle, result_angles[index]))
@@ -72,9 +73,9 @@ class JointDriverServer(Node):
         
 
     def move_joints(self, goal_handle):
-        self.get_logger().info('Executing goal...')
+        self.get_logger().info('Actuating servos')
         #send the goal position to the IK service
-        goal_angles = goal_handle.angle
+        goal_angles = goal_handle.request.angle
 
         #set servos to angles
         index = 0
@@ -82,7 +83,7 @@ class JointDriverServer(Node):
         result_angles = self.angles
         for angle in goal_angles:
             real_angle = self.translate_angle_to_real(angle, index)
-            currentThread = threading.Thread(target=self.move_servo, args=(self, self.servos[index], real_angle, result_angles[index]))
+            currentThread = threading.Thread(target=self.move_servo, args=(self.servos[index], real_angle, result_angles[index]))
             servoThreads.append(currentThread)
             index += 1
         self.error_ocurred = False
@@ -97,10 +98,12 @@ class JointDriverServer(Node):
             # publish the feedback
             current_feedback = MoveJoint.Feedback() 
             try:
+                #self.get_logger().info('sending feedback')
                 current_feedback.last_angles_set = result_angles
                 goal_handle.publish_feedback(current_feedback)
             except Exception as ex:
-                self.get_logger().error("exception sending feedback")  
+                self.get_logger().error("exception sending feedback %r" % (ex,))  
+        self.get_logger().info('all done')       
         for thread in servoThreads:
             thread.join()
         index = 0
@@ -109,9 +112,10 @@ class JointDriverServer(Node):
 
         
          
-        result = MoveJoint.result()
+        result = MoveJoint.Result()
         if not self.error_ocurred:
             result.success = True
+            goal_handle.succeed()
         else: 
             result.success = False
         result.angles = self.angles
@@ -119,8 +123,10 @@ class JointDriverServer(Node):
 
     def move_servo(self, servo, new_angle, set_angle):
         movement_period = self.get_parameter('movement_period').value
+        self.get_logger().info('moving servo')
         try:
-            while not round(servo.angle, 0) == new_angle:
+            while not round(servo.angle, 0) == round(new_angle, 0):
+                self.get_logger().info('servo angle ' + str(servo.angle) + ' target ' + str(new_angle))
                 if new_angle > servo.angle:
                     servo.angle += 1
                     sleep(movement_period)
@@ -141,8 +147,9 @@ class JointDriverServer(Node):
 
 def main(args=None):
     rclpy.init(args=args)
+    executor = MultiThreadedExecutor()
     node = JointDriverServer() 
-    rclpy.spin(node)
+    rclpy.spin(node, executor)
 
 if __name__ == "__main__":
     main()
